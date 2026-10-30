@@ -1,0 +1,119 @@
+# Agent pack: services where the model runs tools with side effects (trait: agent).
+# Core principles: least privilege, human approval for irreversible actions, full audit trail.
+
+- pack: agent
+  axis: trait
+  updated: 2026-10-28
+  description: Execution limits, tool permissions, and human approval for agents that act.
+
+# --- Human in the loop ----------------------------------------------------
+
+- id: AGENT-HITL-01
+  title: Approval for irreversible actions
+  question: Do irreversible or externally visible actions (payment / deletion / sending / deploy / permission changes) require explicit human approval before they run?
+  level: L1
+  blocker: true
+  traits: [agent]
+  method: review
+  pass: Every tool with irreversible or external effects goes through an approval step that blocks until a human confirms
+  partial: Approval exists for some such tools but not all
+  fail: Such tools run without human approval (N/A when the agent has no side-effecting tools)
+  evidence: [approve, confirm, human, require_approval, interrupt, tool]
+  remediation: Mark side-effecting tools as requiring approval and pause the run until a human confirms
+  origin: HITL-01
+
+- id: AGENT-HITL-02
+  title: Approval request shows what and defaults to stop
+  question: Does an approval request show the action / target / arguments and does a timeout default to cancelling?
+  level: L2
+  traits: [agent]
+  method: review
+  pass: Approval prompts show the action, target, and arguments that will actually run, and an unanswered request is cancelled or expires
+  partial: Prompts show the action, target, and arguments, but an unanswered request stays pending with no expiry
+  fail: No approval step exists, the prompt does not show the action, target, and arguments that will run (for example only the model's own summary of them), or an unanswered request proceeds (N/A when the agent has no side-effecting tools)
+  evidence: [approval, timeout, expires, pending, default]
+  remediation: Render the tool name and arguments in the approval UI and treat timeouts as rejection
+  origin: HITL-02
+
+# --- Run limits -----------------------------------------------------------
+
+- id: AGENT-RUN-01
+  title: Run budget
+  question: Is each agent run bounded by maximum steps and maximum time or cost?
+  level: L1
+  traits: [agent]
+  method: review
+  pass: A run stops at a configured maximum number of steps and at a maximum duration or token/cost budget
+  partial: Only one bound (for example steps) is enforced
+  fail: Runs can loop without a bound
+  evidence: [max_steps, max_iterations, recursion_limit, timeout, budget]
+  remediation: Enforce step count and wall-clock or token budget in the agent loop
+  origin: RUN-01
+
+- id: AGENT-RUN-02
+  title: Cancel a running agent
+  question: Can a user or operator stop a running agent?
+  level: L2
+  traits: [agent]
+  method: review
+  pass: A cancel endpoint or control exists and the loop checks for cancellation between steps
+  fail: Runs cannot be stopped once started
+  evidence: [cancel, abort, stop, kill, AbortController]
+  remediation: Add a cancel flag checked between steps and expose it to users and operators
+  origin: RUN-03
+
+# --- Tools ----------------------------------------------------------------
+
+- id: AGENT-TOOL-01
+  title: Tool allowlist and permissions
+  question: Are the tools available to each agent explicitly listed with read / write / delete / external scope?
+  level: L2
+  traits: [agent]
+  method: review
+  pass: Each agent gets an explicit tool list, the executor refuses any name outside it, and tools are classified by effect
+  partial: The executor enforces the list but tools are not classified by effect
+  fail: Agents can reach every tool or arbitrary functions (a list sent only to the model does not limit an executor that looks names up dynamically)
+  evidence: [tools=, tool_choice, allowed_tools, register_tool, permissions]
+  remediation: Define tool lists per agent and tag each tool with its effect level
+  origin: TOOL-02
+
+- id: AGENT-TOOL-02
+  title: Server-side validation of tool arguments
+  question: Are tool arguments produced by the model validated on the server before execution?
+  level: L2
+  traits: [agent]
+  method: review
+  pass: Tool inputs are validated against schemas and authorization is checked against the end user before execution
+  partial: Server-side schema validation exists but authorization or some tools are unchecked (schemas sent only to the model do not count)
+  fail: Tool arguments are executed as given
+  evidence: [input_schema, pydantic, validate, args, parameters]
+  remediation: Validate tool arguments with schemas and check the end user's permission inside each tool
+  policy_question: Which records may any user change or delete through the agent, and which belong only to the user who created them (for example shared folders or team documents)?
+  origin: TOOL-04
+
+- id: AGENT-TOOL-03
+  title: Sandbox for code and shell tools
+  question: Do code-execution / shell / file tools run in a sandbox with limits?
+  level: L2
+  traits: [agent]
+  blocker: true
+  method: review
+  pass: Such tools run in a container / microVM / restricted runtime with network / filesystem / time limits (N/A when there are no such tools)
+  partial: Some isolation exists but without resource or network limits
+  fail: Model-chosen code or commands run on the host process
+  evidence: [subprocess, exec(, docker, sandbox, e2b, firecracker, gvisor]
+  remediation: Run code tools in an isolated sandbox with no default network and a time limit
+  origin: TOOL-05
+
+- id: AGENT-TOOL-04
+  title: Tool call audit log
+  question: Is every tool call recorded with who / which agent / arguments / result / time?
+  level: L2
+  traits: [agent]
+  method: review
+  pass: Each tool invocation is logged with user / agent / tool / arguments / result status / timestamp so one run can be reconstructed
+  partial: Tool calls are logged but key fields are missing
+  fail: Tool calls are not recorded
+  evidence: [tool_call, audit, log, run_id, span]
+  remediation: Log every tool call with a run ID from the shared tool executor
+  origin: TOOL-06

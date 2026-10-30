@@ -1,0 +1,181 @@
+# KR region pack: Korean legal requirements turned into verification questions.
+#
+# - This pack checks that a required notice / record / procedure EXISTS. It does not judge legal sufficiency.
+# - verified: date the citation was last checked. 2026-10-21 checks used secondary sources
+#   (law firm newsletters, IT wiki, government guideline coverage). Re-check against law.go.kr before release.
+# - source.effective is filled only where the effective date was confirmed.
+# - Notable change: the 2025-10-31 amendment of the Personal Information Security Measures Standard
+#   replaces the fixed monthly access-log inspection with an interval set in the internal management plan.
+#   The access-log provisions apply after a one-year grace period (from 2026-10-31).
+
+- pack: kr
+  axis: region
+  updated: 2026-10-28
+  description: Korean privacy law (PIPA) and AI Basic Act duties for services offered in Korea.
+
+# --- Personal Information Protection Act (개인정보 보호법) -----------------
+
+- id: KR-PII-01
+  title: Privacy policy published (개인정보 처리방침)
+  question: Is a privacy policy published and reachable from the service (for example a footer link or signup screen)?
+  level: L1
+  traits: [pii]
+  forms: [web]
+  method: review
+  pass: A privacy policy page exists and is linked from the main UI or signup flow
+  fail: No privacy policy page or link
+  evidence: [privacy, 개인정보처리방침, 개인정보 처리방침, footer, terms]
+  remediation: Publish a privacy policy and link it from the footer and the signup screen
+  source:
+    law: 개인정보 보호법
+    article: 제30조 (개인정보 처리방침의 수립 및 공개)
+    url: https://www.law.go.kr/법령/개인정보보호법
+  verified: 2026-10-21
+  origin: LEGAL-01
+
+- id: KR-PII-02
+  title: Outsourcing disclosed (처리위탁 공개)
+  question: Does the privacy policy list the third parties that process personal data on the service's behalf (hosting / email / SMS / analytics / payment / LLM API)?
+  level: L2
+  traits: [pii]
+  method: review
+  pass: The policy names the processors and what they do and the list covers the external services found in the code
+  partial: A processor section exists but misses services the code actually uses
+  fail: No processor disclosure while the code sends personal data to external services
+  evidence: [처리위탁, 수탁, 위탁, privacy, sendgrid, twilio, analytics]
+  remediation: List every processor and its task in the privacy policy and update it when integrations change
+  source:
+    law: 개인정보 보호법
+    article: 제26조 (업무위탁에 따른 개인정보의 처리 제한)
+    url: https://www.law.go.kr/법령/개인정보보호법
+  verified: 2026-10-21
+  origin: LEGAL-05
+
+- id: KR-PII-03
+  title: Cross-border transfer disclosed (국외 이전)
+  question: When personal data is sent to an overseas service such as an LLM API, does the privacy policy disclose the cross-border transfer (recipient / country / items / purpose / retention)?
+  level: L1
+  traits: [pii, ai]
+  method: review
+  pass: The privacy policy has a cross-border transfer section naming the overseas recipient(s) the code calls with their country / items / purpose / retention (or separate consent is collected for it)
+  partial: A cross-border section exists but omits a recipient or required details
+  fail: The code sends user data to an overseas API and the policy has no cross-border disclosure
+  evidence: [국외 이전, 국외이전, openai, anthropic, google, privacy, 개인정보처리방침]
+  remediation: Add a cross-border transfer section listing each overseas recipient with country / items / purpose / retention
+  source:
+    law: 개인정보 보호법
+    article: 제28조의8 (개인정보의 국외 이전)
+    effective: 2023-09-15
+    url: https://www.law.go.kr/법령/개인정보보호법
+  verified: 2026-10-21
+  origin: LEGAL-06
+
+- id: KR-PII-04
+  title: Access log retention (접속기록 보관)
+  question: Are access records of the personal data processing system kept for at least 1 year (2 years when processing 50,000+ subjects or unique identifiers / sensitive data) with protection against tampering?
+  level: L2
+  traits: [pii]
+  method: review
+  pass: Access records (who / when / where from / which subject / what task) are written to a protected store with a retention of at least 1 year (or 2 years where required)
+  partial: Access records exist but retention is shorter or undefined or the store is not protected
+  fail: No access records for the personal data processing system. A request log that does not name the acting account is not an access record
+  evidence: [access_log, audit, retention, object lock, append-only]
+  remediation: Write access records to an append-only store and set retention to at least 1 or 2 years
+  source:
+    law: 개인정보의 안전성 확보조치 기준
+    article: 제8조 (접속기록의 보관 및 점검)
+    url: https://www.law.go.kr/행정규칙/개인정보의안전성확보조치기준
+  verified: 2026-10-21
+  origin: LEGAL-07
+
+- id: KR-PII-05
+  title: Access log inspection (접속기록 점검)
+  question: Are access records inspected regularly at the interval set in the internal management plan?
+  level: L2
+  traits: [pii]
+  method: interview
+  pass: An inspection interval is set in the internal management plan and inspections are performed and recorded
+  fail: Access records are never reviewed
+  remediation: Set an inspection interval in the internal management plan and keep a record of each inspection (monthly applied before the 2026-10-31 change)
+  source:
+    law: 개인정보의 안전성 확보조치 기준
+    article: 제8조 (접속기록의 보관 및 점검), 2025-10-31 개정
+    effective: 2026-10-31
+    url: https://www.law.go.kr/행정규칙/개인정보의안전성확보조치기준
+  verified: 2026-10-21
+  origin: LEGAL-08
+
+- id: KR-PII-06
+  title: Breach notification procedure (유출 통지·신고)
+  question: Is there a procedure to notify affected users and report to the regulator within 72 hours of learning of a personal data breach?
+  level: L2
+  traits: [pii]
+  method: interview
+  pass: A breach response procedure names the owner and covers user notification and regulator reporting within 72 hours
+  fail: No breach response procedure
+  remediation: Write a breach runbook with an owner / user notice template / reporting channel (PIPC or KISA) and the 72-hour deadline
+  source:
+    law: 개인정보 보호법 제34조, 시행령 제39조·제40조
+    article: 제34조 (개인정보 유출 등의 통지·신고)
+    url: https://www.law.go.kr/법령/개인정보보호법
+  verified: 2026-10-21
+  origin: LEGAL-09
+
+# --- AI Basic Act (인공지능 발전과 신뢰 기반 조성 등에 관한 기본법) ---------
+# Applies to businesses providing products or services that use high-impact or generative AI.
+# Whether a service falls in scope is a legal judgment. This pack checks only that the notices exist.
+
+- id: KR-AI-01
+  title: Prior notice of AI use (사전 고지)
+  question: Are users told in advance that the product or service operates based on AI (for example a notice in onboarding / the chat screen / terms)?
+  level: L1
+  traits: [ai]
+  forms: [web]
+  method: review
+  pass: A visible notice that the feature is AI-based appears before or at first use
+  fail: Users interact with AI features without any notice
+  evidence: [AI, 인공지능, 생성형, notice, onboarding, disclaimer]
+  remediation: Show a notice that the feature runs on AI at onboarding or at the entry to the AI feature
+  source:
+    law: 인공지능 발전과 신뢰 기반 조성 등에 관한 기본법
+    article: 제31조제1항 (인공지능 투명성 확보 의무)
+    effective: 2026-01-22
+    url: https://www.law.go.kr/법령/인공지능발전과신뢰기반조성등에관한기본법
+  verified: 2026-10-21
+  origin: LEGAL-13
+
+- id: KR-AI-02
+  title: Generated output labeled (결과물 표시)
+  question: Are outputs created by generative AI labeled as AI-generated (visible label or watermark / metadata)?
+  level: L1
+  traits: [ai]
+  method: review
+  pass: Generated outputs carry a visible label (logo or text) or an invisible mark such as a watermark or metadata
+  partial: Some output types are labeled and others are not
+  fail: Generated outputs are delivered without any label
+  evidence: [AI 생성, generated, badge, label, watermark, metadata]
+  remediation: Label generated outputs in the UI and add metadata or watermarks to exported files
+  source:
+    law: 인공지능 발전과 신뢰 기반 조성 등에 관한 기본법
+    article: 제31조제2항 (인공지능 투명성 확보 의무)
+    effective: 2026-01-22
+    url: https://www.law.go.kr/법령/인공지능발전과신뢰기반조성등에관한기본법
+  verified: 2026-10-21
+  origin: LEGAL-14
+
+- id: KR-AI-03
+  title: Realistic synthetic media notice (가상 결과물 고지)
+  question: If the service generates sound / images / video that are hard to tell from real ones, are users clearly notified or the output clearly marked?
+  level: L2
+  traits: [ai]
+  method: review
+  pass: Realistic synthetic media is clearly marked or announced so users can recognize it (N/A when no such media is generated)
+  fail: Realistic synthetic media is delivered without notice or marking
+  evidence: [image generation, tts, voice, video, deepfake, watermark]
+  remediation: Mark synthetic audio / images / video clearly and keep the mark in exported files
+  source:
+    law: 인공지능 발전과 신뢰 기반 조성 등에 관한 기본법
+    article: 제31조제3항 (인공지능 투명성 확보 의무)
+    effective: 2026-01-22
+    url: https://www.law.go.kr/법령/인공지능발전과신뢰기반조성등에관한기본법
+  verified: 2026-10-21

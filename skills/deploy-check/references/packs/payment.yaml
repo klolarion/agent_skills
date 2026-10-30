@@ -1,0 +1,56 @@
+# Payment pack: services that process payments (trait: payment).
+
+- pack: payment
+  axis: trait
+  updated: 2026-10-28
+  description: Card data handling, webhook integrity, and refund flows for paid services.
+
+- id: PAY-SEC-01
+  title: No raw card data
+  question: Does the service avoid storing or handling raw card numbers by using the payment provider's tokenization?
+  level: L1
+  traits: [payment]
+  method: review
+  pass: Card details are collected by the provider's hosted fields / checkout / SDK and only tokens or IDs are stored
+  fail: Card numbers or CVC pass through or are stored by the service
+  evidence: [card_number, cvc, pan, token, checkout, payment_intent, billing_key]
+  remediation: Use the provider's hosted checkout or elements and store only provider tokens
+  origin: PAY-01
+
+- id: PAY-HOOK-01
+  title: Webhook signature verification
+  question: Are payment webhooks verified with the provider's signature before processing?
+  level: L1
+  traits: [payment]
+  blocker: true
+  method: review
+  pass: The webhook handler verifies the signature (or re-fetches the payment from the provider API) before changing state
+  fail: Webhook payloads are trusted as received
+  evidence: [webhook, signature, construct_event, verify, hmac]
+  remediation: Verify the webhook signature with the provider SDK and reject unsigned requests
+  origin: PAY-02
+
+- id: PAY-HOOK-02
+  title: Idempotent payment processing
+  question: Is payment and webhook processing idempotent so a replayed or duplicate event does not apply twice?
+  level: L2
+  traits: [payment]
+  method: review
+  pass: Event IDs or idempotency keys are stored and duplicates are ignored
+  fail: Duplicate events would be processed again
+  evidence: [idempotency, event_id, processed_events, unique]
+  remediation: Store processed event IDs with a unique constraint and skip duplicates
+  origin: PAY-02
+
+- id: PAY-FLOW-01
+  title: Refund and cancellation flow
+  question: Are refund / cancellation / failed-payment cases handled in code?
+  level: L2
+  traits: [payment]
+  method: review
+  pass: Refund and cancellation are implemented and failed payments update the order or subscription state
+  partial: Some of these cases are handled
+  fail: Only the success path exists
+  evidence: [refund, cancel, failed, past_due, dunning]
+  remediation: Handle refund / cancel / payment-failed events and reflect them in order or subscription state
+  origin: PAY-04

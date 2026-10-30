@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+docs/
+
+# Development files: tests, tools, evaluations, run notes. Kept local.
+dev/

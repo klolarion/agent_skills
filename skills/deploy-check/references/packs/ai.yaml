@@ -1,0 +1,172 @@
+# AI pack: services that call an LLM (trait: ai).
+# Aligned with OWASP Top 10 for LLM Applications 2025 where relevant.
+
+- pack: ai
+  axis: trait
+  updated: 2026-10-29
+  description: Cost, reliability, safety, and quality controls for services that call LLMs.
+
+# --- Cost -----------------------------------------------------------------
+
+- id: AI-COST-01
+  title: Token and input limits
+  question: Does every LLM call set max output tokens and limit input size?
+  level: L1
+  traits: [ai]
+  method: review
+  pass: A shared LLM wrapper or every call site sets max_tokens and input length is capped before the call
+  partial: max_tokens is set but input size is unbounded (or the reverse)
+  fail: No token or input limits
+  evidence: [max_tokens, max_output_tokens, truncate, max_input, tiktoken]
+  remediation: Set max_tokens in the LLM wrapper and reject or truncate oversized inputs
+  origin: TOK-01
+
+- id: AI-COST-02
+  title: Spend cap and kill switch
+  question: Is there a daily or monthly LLM spend cap that blocks calls when it is reached?
+  level: L1
+  blocker: true
+  traits: [ai]
+  method: review
+  pass: A spend cap is enforced in code (calls stop when reached) or a provider-side hard limit is set in tracked infrastructure config (one only described in docs or set in a console is Needs confirmation)
+  partial: Usage is tracked and alerted but calls are not blocked automatically
+  fail: No spend cap or usage limit is enforced (a budget constant that nothing reads does not count)
+  evidence: [budget, spend_limit, max_cost, kill_switch, usage_limit, quota]
+  remediation: Track spend per day in the LLM wrapper and refuse calls above a configured cap and set a provider-side hard limit
+  origin: TOK-02
+
+- id: AI-COST-03
+  title: Per-user quota
+  question: Are LLM requests limited per user or API key?
+  level: L2
+  traits: [ai]
+  method: review
+  pass: Per-user or per-key rate limits or token quotas are enforced before LLM calls
+  partial: Only a global limit exists
+  fail: Any user can trigger unlimited LLM calls
+  evidence: [quota, rate_limit, per_user, usage, credits]
+  remediation: Count tokens or requests per user and reject requests over quota
+  origin: TOK-03
+
+# --- Model and calls ------------------------------------------------------
+
+- id: AI-LLM-01
+  title: Pinned model versions
+  question: Are models referenced by pinned or dated identifiers rather than floating aliases?
+  level: L2
+  traits: [ai]
+  method: review
+  pass: Model IDs in code or config are dated or pinned versions and come from one config location
+  partial: Model IDs are centralized but use floating aliases (or pinned but scattered)
+  fail: Floating aliases are hard-coded across call sites
+  evidence: [model=, MODEL, model_name, claude-, gpt-, gemini-]
+  remediation: Move model IDs to configuration and use pinned versions and change them through a release
+  origin: LLM-05
+
+- id: AI-LLM-02
+  title: LLM call timeouts and retries
+  question: Do LLM calls set a timeout and a bounded retry policy?
+  level: L1
+  traits: [ai]
+  method: review
+  pass: The LLM client sets an explicit timeout and retries are bounded (an explicit retry count or the SDK's documented default retry count)
+  partial: Retries are bounded but no explicit timeout is set (the SDK default timeout is not enough), or an explicit timeout is set but retries are unbounded or hand-rolled without a limit
+  fail: No explicit timeout and no bounded retries (for example a raw HTTP call to the provider with neither)
+  evidence: [timeout, max_retries, backoff, tenacity, retry]
+  remediation: Configure timeout and max_retries on the shared LLM client
+  origin: LLM-02
+
+- id: AI-LLM-03
+  title: Versioned prompts
+  question: Are prompts kept apart from business logic and versioned so a prompt version can be traced?
+  level: L2
+  traits: [ai]
+  method: review
+  pass: Prompts live in dedicated files or modules with an identifier or version that is recorded with each call
+  partial: Prompts are separated but no version is recorded
+  fail: Prompts are inline strings scattered through the code
+  evidence: [prompts/, PROMPT, system_prompt, prompt_version, .prompt]
+  remediation: Move prompts into a prompts module with version identifiers and log the version per call
+  origin: LLM-06
+
+# --- Safety ---------------------------------------------------------------
+
+- id: AI-GRD-01
+  title: Untrusted content handled as data
+  question: Is external content (web pages / documents / emails / tool results) passed to the model as data and kept separate from instructions?
+  level: L2
+  traits: [ai]
+  method: review
+  pass: External content is placed in delimited data sections or separate messages and cannot change system instructions or tool permissions
+  partial: Some separation exists but external text is concatenated into instruction strings in places
+  fail: External content is concatenated directly into system or instruction prompts on every path that passes it to the model
+  evidence: [system, messages, retrieved, context, document, f"]
+  remediation: Keep instructions in the system message and pass external content in clearly delimited user or tool messages
+  origin: GRD-02
+
+- id: AI-GRD-02
+  title: LLM output validated before execution
+  question: Is model output validated before it is used as SQL / shell commands / code / HTML? (Tool-call arguments are judged by AGENT-TOOL-02 instead.)
+  level: L1
+  traits: [ai]
+  method: review
+  pass: Model output is parsed against a schema or allowlist before execution or rendering and HTML is escaped or sanitized. N/A when model output never reaches HTML, SQL, a shell, or code
+  partial: Validation exists on some paths
+  fail: Model output is executed or rendered directly on every path that uses it
+  evidence: [eval(, exec(, subprocess, execute(, dangerouslySetInnerHTML, innerHTML, json.loads]
+  remediation: Parse model output into a typed schema and never pass it straight to an interpreter or the DOM
+  origin: GRD-03
+
+- id: AI-GRD-03
+  title: No secrets in prompts
+  question: Are secrets and credentials kept out of prompts and system messages?
+  level: L1
+  traits: [ai]
+  method: review
+  pass: Prompts contain no keys / passwords / internal credentials and tools fetch credentials server-side
+  fail: A secret or credential is interpolated into a prompt
+  evidence: [system_prompt, os.environ, api_key, password, token]
+  remediation: Remove credentials from prompts and let server-side tools use them without exposing them to the model
+  origin: GRD-04
+
+- id: AI-GRD-04
+  title: Retrieval respects access rights
+  question: If the service retrieves documents for the model (RAG) are results filtered by the caller's permissions before they enter the context?
+  level: L2
+  traits: [ai]
+  method: review
+  pass: Retrieval queries apply the caller's tenant or permission filter (N/A when there is no retrieval)
+  partial: Filtering happens after retrieval or only for some indexes
+  fail: Retrieval returns documents regardless of the caller
+  evidence: [retriever, vector, similarity_search, filter=, namespace, tenant]
+  policy_question: May every user of the service see every document in the retrieval index, or should results depend on who is asking?
+  remediation: Store access metadata with each chunk and filter by it in the retrieval query
+  origin: GRD-05
+
+# --- Quality and observability -------------------------------------------
+
+- id: AI-EVAL-01
+  title: Golden set and regression check
+  question: Is there an evaluation set that is run when prompts or models change?
+  level: L2
+  traits: [ai]
+  method: review
+  pass: An eval dataset exists and a script or CI job runs it on prompt or model changes
+  partial: An eval dataset exists but nothing runs it
+  fail: No evaluation set
+  evidence: [evals/, golden, eval_, promptfoo, deepeval]
+  remediation: Collect 20-50 representative cases and a script that fails when quality drops
+  origin: EVAL-01
+
+- id: AI-OBS-01
+  title: LLM call tracing
+  question: Are LLM calls recorded with model / prompt version / tokens / latency?
+  level: L2
+  traits: [ai]
+  method: review
+  pass: Each LLM call records model and token usage and latency (and prompt version) through tracing or structured logs
+  partial: Some of these fields are recorded
+  fail: LLM calls are not recorded
+  evidence: [usage, input_tokens, opentelemetry, langfuse, langsmith, span]
+  remediation: Wrap LLM calls to emit a span or structured log with model / version / tokens / latency
+  origin: OBS-11

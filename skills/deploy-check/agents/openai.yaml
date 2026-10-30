@@ -1,0 +1,6 @@
+interface:
+  display_name: "Deploy Check"
+  short_description: "Evidence-backed deployment readiness audit with levels, blockers, AI/agent and KR law packs"
+  default_prompt: "Use $deploy-check to audit this repository for deployment readiness and report the readiness level, blockers, and per-item evidence."
+policy:
+  allow_implicit_invocation: true

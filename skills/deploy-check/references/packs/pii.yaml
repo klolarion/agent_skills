@@ -1,0 +1,58 @@
+# PII pack: services that store personal data (trait: pii). Region-neutral.
+# Country-specific legal duties live in region packs (for example kr.yaml).
+
+- pack: pii
+  axis: trait
+  updated: 2026-10-28
+  description: Technical protections for services that store personal data.
+
+- id: PII-ENC-01
+  title: Password hashing
+  question: Are user passwords stored with a slow password hash (argon2id / bcrypt / scrypt)?
+  level: L1
+  traits: [pii]
+  method: review
+  pass: Passwords are hashed with argon2id / bcrypt / scrypt (or authentication is delegated to an external IdP so no passwords are stored)
+  fail: Passwords are stored in plain text or with a fast hash (MD5 / SHA-1 / SHA-256 without a KDF)
+  evidence: [argon2, bcrypt, scrypt, passlib, hashlib, password]
+  remediation: Hash passwords with argon2id or bcrypt and rehash on next login
+  origin: ENC-04
+
+- id: PII-ENC-02
+  title: Sensitive fields encrypted at rest
+  question: Are highly sensitive personal fields (national ID / health / financial data) encrypted at the field level?
+  level: L3
+  traits: [pii]
+  method: review
+  pass: Sensitive columns are encrypted with a managed key before storage (N/A when no such fields are stored)
+  fail: Sensitive fields are stored in plain text
+  evidence: [encrypt, decrypt, kms, fernet, AES]
+  policy_question: Which stored fields does your business treat as sensitive (for example health data / national ID / bank account)?
+  remediation: Encrypt sensitive columns with a KMS-managed key and keep keys out of the database
+  origin: ENC-05
+
+- id: PII-DATA-01
+  title: Account and data deletion path
+  question: Can users delete their account and personal data (and is the data actually removed or anonymized)?
+  level: L2
+  traits: [pii]
+  method: review
+  pass: A deletion flow exists and removes or anonymizes the user's personal data (including related records)
+  partial: Accounts can be deactivated but personal data is kept indefinitely
+  fail: No deletion path
+  evidence: [delete_account, withdraw, deactivate, anonymize, erase]
+  remediation: Implement account deletion that removes or anonymizes personal data and schedule purge of backups by retention
+  origin: LEGAL-03
+
+- id: PII-LOG-01
+  title: Personal data access records
+  question: Is access to personal data by staff and admin systems recorded (who / when / which subject / what action)?
+  level: L3
+  traits: [pii]
+  method: review
+  pass: Admin and staff access to personal data is logged with actor / time / subject / action into a tamper-resistant store
+  partial: Some access is logged or fields are incomplete
+  fail: Access to personal data is not recorded. A request log that does not name the acting account is not an access record
+  evidence: [access_log, audit, admin, viewed, export]
+  remediation: Log every staff or admin read and export of personal data from the admin data-access layer
+  origin: LOG-08

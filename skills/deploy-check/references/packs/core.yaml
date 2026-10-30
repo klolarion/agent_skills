@@ -1,0 +1,357 @@
+# Core pack: applies to every service. Region- and domain-neutral.
+# Grammar: see scripts/packs.py. Do not use commas inside inline list items.
+
+- pack: core
+  axis: core
+  updated: 2026-10-29
+  description: Baseline checks for any deployed web service, API, or worker.
+
+# --- Secrets ---------------------------------------------------------------
+
+- id: CORE-SEC-01
+  title: No committed secrets
+  question: Are the tracked files free of real credentials (API keys, private keys, passwords, tokens)?
+  level: L1
+  blocker: true
+  method: probe
+  pass: No credential patterns are found in tracked files and no real .env file is tracked
+  fail: A credential pattern or a tracked .env file is found
+  evidence: [.env, credentials.json, "*.pem", api_key, secret, password, token]
+  remediation: Remove the secret from the repository, rotate it immediately, and load it from the environment or a secret manager
+  origin: SEC-08
+
+- id: CORE-SEC-02
+  title: Env files ignored
+  question: Does .gitignore exclude local environment files such as .env?
+  level: L1
+  method: probe
+  pass: .gitignore contains a pattern that matches .env
+  fail: No .gitignore or no pattern matching .env
+  evidence: [.gitignore]
+  remediation: Add .env and .env.* (except .env.example) to .gitignore
+  origin: SEC-08
+
+- id: CORE-SEC-03
+  title: Secret scanning gate
+  question: Is a secret scanner run automatically in pre-commit or CI?
+  level: L2
+  method: probe
+  pass: gitleaks / trufflehog / detect-secrets / ggshield runs in a pre-commit hook or CI workflow
+  fail: No secret scanner is configured
+  evidence: [.pre-commit-config.yaml, .github/workflows, .gitlab-ci.yml, gitleaks]
+  remediation: Add gitleaks to pre-commit and as a CI step that fails the build
+  origin: SEC-07
+
+# --- Authentication and authorization ------------------------------------
+
+- id: CORE-AUTH-01
+  title: Auth on non-public routes
+  question: Do all routes that expose user data or admin functions require authentication?
+  level: L1
+  blocker: true
+  forms: [web, api]
+  method: review
+  pass: Every non-public route is covered by an auth middleware or guard and public routes are explicitly listed or marked
+  partial: Auth exists but at least one data or admin route is reachable without it
+  fail: No authentication mechanism exists for routes that expose user data or admin functions
+  evidence: [middleware, Depends, login_required, guard, auth, admin]
+  remediation: Apply auth at the router or middleware level by default and allowlist public routes explicitly
+  origin: SEC-03
+
+- id: CORE-AUTH-02
+  title: Object-level authorization
+  question: When a request names a resource by an identifier the caller supplies (a record ID / an external account or installation ID / a storage object key or path), does the server check that the caller owns or may access it before reading / changing / signing a URL for it?
+  level: L1
+  blocker: true
+  forms: [api]
+  method: review
+  pass: Every lookup by a caller-supplied identifier is scoped to the caller (owner or tenant filter or explicit permission check) in each handler or a shared data-access layer. This includes tenant or company IDs taken from the request (for example at signup), external IDs mapped to the caller's tenant, and object keys restricted to the caller's prefix before a signed URL is issued
+  partial: Some handlers scope by caller and others use a caller-supplied identifier without the check (one unchecked path is enough. Name each one)
+  fail: Resources are fetched by caller-supplied identifiers without checking the caller
+  evidence: [user_id, owner_id, tenant, org_id, get_object, find_by_id, "{id}", permission, installation_id, account_id, s3_key, signed_url, presign]
+  remediation: Scope queries by the authenticated user or tenant in a shared data-access layer and add a cross-user access test
+  origin: SEC-04
+
+- id: CORE-AUTH-03
+  title: Admin separation and MFA
+  question: Are admin functions separated (route or network restriction) and protected with MFA?
+  level: L2
+  forms: [web, api]
+  method: review
+  pass: Admin routes are separated and restricted and admin login requires MFA (in code or via an IdP setting in tracked config)
+  partial: Admin routes are separated but MFA is not evident
+  fail: Admin functions share the normal user surface without extra protection
+  evidence: [admin, totp, mfa, otp, allowlist, ip_whitelist]
+  remediation: Move admin behind a separate route group with IP or VPN restriction and require MFA through the IdP
+  origin: SEC-17
+
+- id: CORE-AUTH-04
+  title: Unforgeable session credentials
+  question: On each request after login, is the session token verified cryptographically or against a server-side store rather than trusted as a client-supplied identifier? (How tokens are issued at login is CORE-AUTH-05. A signing secret that falls back to a default is CORE-SEC-08.)
+  level: L1
+  forms: [web, api]
+  method: review
+  pass: Tokens are signed and verified (JWT signature with a server secret / signed cookies) or looked up in a server-side session store and expire
+  partial: Tokens are verified but never expire
+  fail: When handling a request the server derives the user from a value the client can forge (a raw user ID / unsigned token / unverified JWT)
+  evidence: [jwt.decode, verify, signature, session, SECRET_KEY, current_user, token]
+  remediation: Issue signed tokens (or server-side sessions) with expiry and verify them on every request
+  origin: SEC-02
+
+- id: CORE-AUTH-05
+  title: Login verifies credentials
+  question: Does every login or token-issuing endpoint verify a secret the user proves (password hash comparison / OTP / IdP assertion) before it issues a token or session?
+  level: L1
+  blocker: true
+  forms: [web, api]
+  method: review
+  pass: Every path that issues a token or session first succeeds a credential check (password hash compare such as bcrypt checkpw or PasswordEncoder.matches / verified OAuth or SAML or OIDC assertion / OTP) and a failed check stops issuance. Trace from the route to the issuing call; a check that exists elsewhere does not count. N/A when the service issues no tokens (auth fully delegated to a gateway or IdP that the code verifies)
+  partial: Credentials are verified on the main login path but another issuing path (dev/test login / SSO callback / refresh / impersonation) skips the check and is reachable in production
+  fail: The main login path (or every issuing path) issues a token or session from an identifier alone (user ID / username / email) or ignores the result of the credential check. When the main path verifies and only another path skips the check, the verdict is Partial
+  evidence: [login, signin, authenticate, matches(, checkpw, verify_password, compare(, createToken, issue, encode(]
+  remediation: Compare the submitted secret with the stored hash (or verify the IdP assertion) before issuing any token and add a test that a wrong password is rejected
+
+# --- Request hardening ----------------------------------------------------
+
+- id: CORE-SEC-04
+  title: Security headers
+  question: Do the HTML pages the product serves to its users set CSP, X-Content-Type-Options, X-Frame-Options (or frame-ancestors), and Referrer-Policy? JSON APIs and framework-generated API docs pages (Swagger UI, ReDoc) are out of scope for this item.
+  level: L2
+  forms: [web]
+  method: review
+  pass: All four headers are set globally by middleware or the reverse proxy
+  partial: Some headers are set or they apply only to some routes
+  fail: No security header configuration found
+  evidence: [helmet(, add_header, next.config, headers(), SecurityMiddleware, Content-Security-Policy]
+  remediation: Enable helmet (Node) or equivalent middleware or set the headers in the reverse proxy
+  origin: SEC-13
+
+- id: CORE-SEC-05
+  title: CORS allowlist
+  question: Is CORS restricted to an explicit list of origins (no wildcard)?
+  level: L1
+  forms: [api]
+  method: review
+  pass: Allowed origins in the production configuration are an explicit list of the service's own HTTPS origins (in code or config) and credentials are never combined with a wildcard, or the service sends no CORS headers at all (browsers then refuse cross-origin reads)
+  partial: The production list is explicit but also contains development origins (localhost / raw IP addresses / plain http)
+  fail: Origins are "*" or reflect the request origin without a check
+  evidence: [CORSMiddleware, allow_origins, cors(, Access-Control-Allow-Origin]
+  remediation: Load an explicit origin allowlist from configuration per environment
+  origin: SEC-12
+
+- id: CORE-SEC-06
+  title: Rate limiting
+  question: Are public and authentication endpoints rate limited?
+  level: L2
+  forms: [api]
+  method: review
+  pass: A rate limiter covers login and public endpoints (in code or gateway config in the repo)
+  partial: Rate limiting covers only some sensitive endpoints
+  fail: No rate limiting found
+  evidence: [slowapi, express-rate-limit, limiter, limit_req, throttle]
+  remediation: Add a rate limiter keyed by IP and user for auth and public endpoints
+  origin: SEC-14
+
+- id: CORE-SEC-07
+  title: Schema-based input validation
+  question: Is request input validated against a schema before use?
+  level: L2
+  forms: [api]
+  method: review
+  pass: Request bodies and parameters are parsed through schemas (pydantic / zod / class-validator or similar) and raw SQL is parameterized
+  partial: Validation exists for some endpoints or raw SQL string building is present somewhere
+  fail: Handlers read raw input without validation
+  evidence: [pydantic, BaseModel, zod, class-validator, execute(, f"SELECT]
+  remediation: Define request schemas for every endpoint and use parameterized queries only
+  origin: SEC-10
+
+- id: CORE-SEC-08
+  title: No default secrets or accounts in production
+  question: Can production run with a secret that silently falls back to a default or placeholder, or with an account whose password is known because startup created it? (Secret literals hard-coded in tracked files are CORE-SEC-01.)
+  level: L1
+  blocker: true
+  method: review
+  pass: Every secret the service needs (signing keys / encryption keys / API keys / DB passwords) comes from the environment or a secret store with no usable fallback, so a missing or placeholder value stops startup in production (code that pads or repeats an empty or short value into a working key is a fallback; an empty value that only makes later calls fail is not), and no account the service creates (seeded at startup or migration, or created by an admin or an invite flow) gets a fixed or predictable initial password outside test and local profiles
+  partial: One of the two holds (for example secrets have no fallback but an admin with a default password is seeded)
+  fail: A secret falls back to a usable default or placeholder ("change-me" / "secret" / an empty string) in production code and nothing rejects it, and the service creates accounts with known or predictable credentials in production
+  evidence: [change-me, changeme, "getenv(", "environ.get(", default, placeholder, seed, on_event, CommandLineRunner, DataInitializer, admin, startup]
+  remediation: Read secrets without defaults and fail startup when one is missing or still a placeholder; create the first admin through a one-time setup step with a generated password, never in startup code
+
+# --- Dependencies and CI --------------------------------------------------
+
+- id: CORE-DEP-01
+  title: Lock file committed
+  question: Does every package manifest have a committed lock file?
+  level: L1
+  method: probe
+  pass: Each manifest (package.json / pyproject.toml / requirements.txt / build.gradle / pom.xml and the like) has a lock file or fully pinned versions. Gradle and Maven count as pinned when no dependency uses a dynamic version or range
+  fail: A manifest exists without a lock file or pinned versions
+  evidence: [package-lock.json, pnpm-lock.yaml, yarn.lock, uv.lock, poetry.lock]
+  remediation: Commit the lock file generated by your package manager
+  origin: FND-01
+
+- id: CORE-DEP-02
+  title: Dependency vulnerability scanning
+  question: Are dependencies scanned for known vulnerabilities automatically?
+  level: L2
+  method: probe
+  pass: Dependabot / Renovate is configured or CI runs an audit tool (pip-audit / npm audit / osv-scanner / trivy)
+  fail: No automated dependency scanning
+  evidence: [.github/dependabot.yml, renovate.json, pip-audit, npm audit, osv-scanner]
+  remediation: Enable Dependabot alerts and add an audit step to CI
+  origin: SEC-19
+
+- id: CORE-DEP-03
+  title: No known severe dependency vulnerabilities
+  question: Does a dependency scanner report for the audited commit show no high or critical vulnerabilities in the packages the service ships?
+  level: L2
+  method: probe
+  pass: A scanner report (npm audit / pip-audit / osv-scanner / trivy) produced outside the repository for the audited commit covers every package ecosystem in the repo and lists no high or critical vulnerability (any vulnerability when the scanner reports no severity)
+  fail: A scanner report lists a high or critical vulnerability in a dependency
+  evidence: [npm audit, pip-audit, osv-scanner, trivy, sarif]
+  remediation: Run the scanner in CI on every change, fail the build on high or critical findings, and keep the report as a build artifact
+
+- id: CORE-CI-01
+  title: CI runs tests
+  question: Does CI run the test suite on every push or pull request?
+  level: L2
+  method: probe
+  pass: A CI workflow runs a test command whose failure fails the build, and the pipeline that builds or deploys the production release runs those tests or waits for them
+  fail: No CI workflow, no test step, the test failure is swallowed (for example "|| true"), or the production release is built without running or waiting for tests that otherwise run only by hand, on a schedule, or for another branch (tests on every pull request: see judging "Several pipelines")
+  evidence: [.github/workflows, .gitlab-ci.yml, pytest, npm test, go test]
+  remediation: Add a CI workflow that runs lint and tests on pull requests
+  origin: CICD-01
+
+- id: CORE-TEST-01
+  title: Tests on critical paths
+  question: Do tests cover authentication and data-writing paths?
+  level: L2
+  method: review
+  pass: Tests check that login refuses a wrong credential (with an external identity provider, that a request without a valid token is refused) and exercise at least one data-writing endpoint or function
+  partial: Tests exist but none refuses a wrong credential, or none covers a data-writing path
+  fail: No tests
+  evidence: [tests/, test_, .spec., .test.]
+  remediation: Add tests for auth rejection and for the main write paths first
+  origin: TEST-01
+
+# --- Operations -----------------------------------------------------------
+
+- id: CORE-OPS-01
+  title: Health endpoint
+  question: Does the service expose a health or readiness endpoint?
+  level: L2
+  forms: [api]
+  method: review
+  pass: A health/readiness route exists and the deploy config or container healthcheck calls it, so a failing check stops the rollout or restarts the container
+  partial: A health route exists but nothing uses it, or the deploy check calls a path that does not exist or ignores its failure (for example "|| true")
+  fail: No health endpoint
+  evidence: [/health, /healthz, /ready, HEALTHCHECK, readinessProbe]
+  remediation: Add a lightweight /health route and reference it in the container or platform healthcheck
+  origin: AVL-01
+
+- id: CORE-OPS-02
+  title: Rollback path
+  question: Is there a known way to return production to the previous version?
+  level: L1
+  method: review
+  pass: A rollback procedure is documented or the deploy setup supports redeploying a previous immutable version
+  partial: Releases are versioned (tagged images or builds) but neither a written procedure nor the deploy setup shows how to redeploy an earlier one
+  fail: Deploys overwrite in place with no way back
+  evidence: [rollback, deploy, image tag, release, CHANGELOG, docs/runbook]
+  remediation: Tag deploy artifacts with the commit SHA and write a short rollback runbook
+  origin: CICD-07
+
+- id: CORE-OPS-03
+  title: Restore rehearsal
+  question: Has a backup restore actually been performed and timed?
+  level: L2
+  method: interview
+  pass: A restore was performed and its duration recorded
+  fail: Restores have never been tested
+  remediation: Restore the latest backup into a scratch environment and record the time it took
+  origin: BAK-03
+
+- id: CORE-BAK-01
+  title: Automated database backups
+  question: Are database backups automated with a defined retention?
+  level: L2
+  forms: [api, worker]
+  method: review
+  pass: Backup schedule and retention are defined in IaC or deploy config in the repo
+  fail: The database is defined in IaC or deploy config in the repo and that definition has no backup settings (when the database is managed outside the repo this is Needs confirmation)
+  evidence: [backup, backup_retention, snapshot, pg_dump, terraform]
+  remediation: Enable managed automated backups with a retention period and record it in IaC
+  origin: BAK-02
+
+- id: CORE-RES-01
+  title: Timeouts on outbound calls
+  question: Do outbound HTTP and database calls set explicit timeouts?
+  level: L2
+  method: review
+  pass: HTTP clients and DB connections set explicit timeouts (in a shared client or per call)
+  partial: Some outbound calls set timeouts and others rely on defaults
+  fail: No explicit timeouts on outbound calls
+  evidence: [timeout=, httpx, requests., axios, fetch(, connect_timeout]
+  remediation: Create shared clients with explicit connect and read timeouts
+  origin: RES-01
+
+# --- Logging and observability -------------------------------------------
+
+- id: CORE-LOG-01
+  title: Structured logs with request ID
+  question: Are logs structured (e.g. JSON) and do they carry a request or trace ID?
+  level: L2
+  method: review
+  pass: A logging setup emits structured records and a request ID is generated and attached per request
+  partial: Structured logging or request IDs but not both
+  fail: No logging setup at all or only print statements / unstructured logs
+  evidence: [structlog, logging.config, pino, winston, request_id, trace_id]
+  remediation: Configure a JSON logger and a middleware that sets a request ID in the log context
+  origin: LOG-02
+
+- id: CORE-LOG-02
+  title: Sensitive data masked in logs
+  question: Are passwords, tokens, and personal data kept out of logs?
+  level: L2
+  method: review
+  pass: No code path logs credentials / tokens / raw request bodies with personal data (a redaction filter is a plus but not required)
+  partial: A few code paths log sensitive fields
+  fail: Credentials or raw request bodies with personal data are routinely logged
+  evidence: [redact, mask, filter, logger., print(]
+  remediation: Add a redaction filter for known sensitive keys and stop logging raw bodies
+  origin: LOG-04
+
+- id: CORE-LOG-03
+  title: Audit log for privileged changes
+  question: Are admin actions and changes to user data recorded with actor, action, target, and time?
+  level: L2
+  method: review
+  pass: An audit log records actor / action / target / timestamp for admin and data-changing operations and is stored separately from app logs
+  partial: Some audit records exist but fields or coverage are incomplete
+  fail: No audit trail
+  evidence: [audit, AuditLog, actor, history]
+  remediation: Write audit events from a shared service layer into an append-only table or store
+  origin: LOG-06
+
+- id: CORE-OBS-01
+  title: Error tracking
+  question: Are unhandled errors reported to an error tracker?
+  level: L2
+  method: probe
+  pass: An error tracking SDK is initialized (Sentry / Rollbar / Bugsnag / Honeybadger)
+  fail: No error tracker is initialized
+  evidence: [sentry_sdk.init, Sentry.init, "@sentry/", rollbar, bugsnag]
+  remediation: Initialize an error tracker in each deployable and set an alert for new issues
+  origin: OBS-01
+
+- id: CORE-DOC-01
+  title: Run instructions and env reference
+  question: Does the README explain how to run the service and which environment variables it needs?
+  level: L2
+  method: review
+  pass: README has run steps and an env var list or a maintained .env.example
+  partial: Run steps without env vars or the reverse
+  fail: No run instructions
+  evidence: [README.md, .env.example]
+  remediation: Add a quick start section and keep .env.example in sync with the code
+  origin: DOC-01
