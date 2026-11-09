@@ -1,0 +1,6 @@
+interface:
+  display_name: "Tech Report"
+  short_description: "Analysis report on a release or technology change, every fact traced to a verified source quote"
+  default_prompt: "Use $tech-report to write an analysis report on this release for my team, with the bottom line first and every fact sourced."
+policy:
+  allow_implicit_invocation: true
